@@ -1,0 +1,21 @@
+# Xcode
+build/
+*.xcuserdata
+*.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
+*.xcworkspace/xcuserdata
+*.xcworkspace/xcshareddata/swiftpm
+DerivedData/
+*.hmap
+*.ipa
+*.xcarchive
+.swiftpm/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Build artifacts
+HourlyChime.app/
+*.o
+*.d
