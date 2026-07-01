@@ -8,6 +8,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var clockTimer: Timer?
     private var chimeTimer: Timer?
+    private var activeSound: NSSound?
 
     // Hour Progress HUD state
     private var hudWindow: NSWindow?
@@ -107,12 +108,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         scheduleNextChime()
     }
 
-    private func playChime() {
+    private func playSound() {
         let soundName = UserDefaults.standard.string(forKey: soundKey) ?? "Tink"
         let volume = UserDefaults.standard.float(forKey: volumeKey)
         guard let sound = NSSound(named: NSSound.Name(soundName)) else { return }
         sound.volume = volume
+        activeSound = sound   // retain strongly so ARC doesn't release mid-playback
         sound.play()
+    }
+
+    private func playChime() {
+        playSound()
         triggerVisualAlerts()
     }
 
@@ -139,9 +145,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showRingOnScreen(_ screen: NSScreen) {
         let sf = screen.frame
-        let shortSide = min(sf.width, sf.height)
-        let ringRadius = shortSide * 0.3
-        let center = CGPoint(x: sf.width / 2, y: sf.height / 2)
+        let borderWidth: CGFloat = 50
 
         let window = NSWindow(
             contentRect: sf,
@@ -160,48 +164,68 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         contentView.wantsLayer = true
         window.contentView = contentView
 
-        let ringLayer = CAShapeLayer()
-        let ringPath = CGMutablePath()
-        ringPath.addArc(center: center, radius: ringRadius, startAngle: 0, endAngle: .pi * 2, clockwise: false)
-        ringLayer.path = ringPath
-        ringLayer.fillColor = NSColor.clear.cgColor
-        ringLayer.strokeColor = NSColor(red: 0.0, green: 0.831, blue: 1.0, alpha: 1.0).cgColor
-        ringLayer.lineWidth = 8
-        ringLayer.shadowColor = NSColor(red: 0.0, green: 0.831, blue: 1.0, alpha: 1.0).cgColor
-        ringLayer.shadowRadius = 20
-        ringLayer.shadowOpacity = 0.9
-        ringLayer.shadowOffset = .zero
-        ringLayer.opacity = 0
-        contentView.layer?.addSublayer(ringLayer)
+        let cyanOpaque = NSColor(red: 0.0, green: 0.831, blue: 1.0, alpha: 0.60).cgColor
+        let cyanClear  = NSColor(red: 0.0, green: 0.831, blue: 1.0, alpha: 0.0).cgColor
 
+        // Container layer so a single opacity animation drives all four strips
+        let container = CALayer()
+        container.frame = CGRect(origin: .zero, size: sf.size)
+
+        func addStrip(frame: CGRect, startPt: CGPoint, endPt: CGPoint) {
+            let grad = CAGradientLayer()
+            grad.frame = frame
+            grad.colors = [cyanOpaque, cyanClear]
+            grad.startPoint = startPt
+            grad.endPoint   = endPt
+            container.addSublayer(grad)
+        }
+
+        // macOS CALayer origin is bottom-left (Y-up), so:
+        // "top" strip lives at y = sf.height - borderWidth
+        // "bottom" strip lives at y = 0
+        addStrip(
+            frame:   CGRect(x: 0, y: sf.height - borderWidth, width: sf.width, height: borderWidth),
+            startPt: CGPoint(x: 0.5, y: 1), endPt: CGPoint(x: 0.5, y: 0)   // opaque top → transparent bottom
+        )
+        addStrip(
+            frame:   CGRect(x: 0, y: 0, width: sf.width, height: borderWidth),
+            startPt: CGPoint(x: 0.5, y: 0), endPt: CGPoint(x: 0.5, y: 1)   // opaque bottom → transparent top
+        )
+        addStrip(
+            frame:   CGRect(x: 0, y: 0, width: borderWidth, height: sf.height),
+            startPt: CGPoint(x: 0, y: 0.5), endPt: CGPoint(x: 1, y: 0.5)   // opaque left → transparent right
+        )
+        addStrip(
+            frame:   CGRect(x: sf.width - borderWidth, y: 0, width: borderWidth, height: sf.height),
+            startPt: CGPoint(x: 1, y: 0.5), endPt: CGPoint(x: 0, y: 0.5)   // opaque right → transparent left
+        )
+
+        // Start invisible
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        container.opacity = 0
+        CATransaction.commit()
+
+        contentView.layer?.addSublayer(container)
         window.orderFrontRegardless()
 
         // Fade in over 0.3s
-        DispatchQueue.main.async {
-            let fadeIn = CABasicAnimation(keyPath: "opacity")
-            fadeIn.fromValue = 0
-            fadeIn.toValue = 1
-            fadeIn.duration = 0.3
-            fadeIn.fillMode = .forwards
-            fadeIn.isRemovedOnCompletion = false
-            ringLayer.add(fadeIn, forKey: "fadeIn")
-            ringLayer.opacity = 1
-        }
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(0.3)
+        CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeIn))
+        container.opacity = 1
+        CATransaction.commit()
 
-        // Begin fade out at 1.5s, finish at 2.0s
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-            let fadeOut = CABasicAnimation(keyPath: "opacity")
-            fadeOut.fromValue = 1
-            fadeOut.toValue = 0
-            fadeOut.duration = 0.5
-            fadeOut.fillMode = .forwards
-            fadeOut.isRemovedOnCompletion = false
-            ringLayer.add(fadeOut, forKey: "fadeOut")
-            ringLayer.opacity = 0
-        }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-            window.close()
+        // Fade out starting at 1.5s, close when done
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [window, container] in
+            CATransaction.begin()
+            CATransaction.setAnimationDuration(0.5)
+            CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeOut))
+            CATransaction.setCompletionBlock { [window] in
+                window.close()
+            }
+            container.opacity = 0
+            CATransaction.commit()
         }
     }
 
@@ -216,18 +240,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         tf.dateFormat = "h:mm a"
         let timeString = tf.string(from: Date())
 
-        // Scale panel width with font size to handle "12:00 AM"
         let panelWidth: CGFloat = max(240, fontSize * 4.5)
         let panelHeight: CGFloat = fontSize + 40
         let inset: CGFloat = 20
 
         let finalX = sf.maxX - panelWidth - inset
         let finalY = sf.maxY - panelHeight - inset
-        let finalFrame = NSRect(x: finalX, y: finalY, width: panelWidth, height: panelHeight)
-        let startFrame = NSRect(x: finalX + 60, y: finalY, width: panelWidth, height: panelHeight)
 
         let window = NSWindow(
-            contentRect: startFrame,
+            contentRect: NSRect(x: finalX, y: finalY, width: panelWidth, height: panelHeight),
             styleMask: .borderless,
             backing: .buffered,
             defer: false
@@ -238,7 +259,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         window.hasShadow = false
         window.ignoresMouseEvents = true
         window.collectionBehavior = [.canJoinAllSpaces, .stationary]
-        window.alphaValue = 0
 
         let bgView = NSView(frame: NSRect(origin: .zero, size: NSSize(width: panelWidth, height: panelHeight)))
         bgView.wantsLayer = true
@@ -263,30 +283,34 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         shadow.shadowOffset = NSSize(width: 0, height: -2)
         shadow.shadowBlurRadius = 6
         label.shadow = shadow
-
         bgView.addSubview(label)
+
+        // Start transparent
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        bgView.layer?.opacity = 0
+        CATransaction.commit()
+
         window.orderFrontRegardless()
 
-        // Slide in from right + fade in
-        NSAnimationContext.runAnimationGroup({ ctx in
-            ctx.duration = 0.4
-            ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            window.animator().setFrame(finalFrame, display: true)
-            window.animator().alphaValue = 1.0
-        }, completionHandler: {
-            // Hold 3s, then slide out + fade
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-                let exitFrame = NSRect(x: finalX + 60, y: finalY, width: panelWidth, height: panelHeight)
-                NSAnimationContext.runAnimationGroup({ ctx in
-                    ctx.duration = 0.4
-                    ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-                    window.animator().setFrame(exitFrame, display: true)
-                    window.animator().alphaValue = 0
-                }, completionHandler: {
-                    window.close()
-                })
+        // Fade in over 0.4s
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(0.4)
+        CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeInEaseOut))
+        bgView.layer?.opacity = 1
+        CATransaction.commit()
+
+        // Hold 3s then fade out and close
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.4) { [window, bgView] in
+            CATransaction.begin()
+            CATransaction.setAnimationDuration(0.4)
+            CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeInEaseOut))
+            CATransaction.setCompletionBlock { [window] in
+                window.close()
             }
-        })
+            bgView.layer?.opacity = 0
+            CATransaction.commit()
+        }
     }
 
     // MARK: - Feature 3: Hour Progress Arc HUD
@@ -566,7 +590,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func handlePreviewAlerts() {
-        triggerVisualAlerts()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            self?.playSound()
+            self?.triggerVisualAlerts()
+        }
     }
 
     // MARK: - Helpers
@@ -575,6 +602,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if #available(macOS 13.0, *) {
             return SMAppService.mainApp.status == .enabled
         }
+        return false
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         return false
     }
 }
