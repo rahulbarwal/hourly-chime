@@ -21,8 +21,26 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private let visualRingKey = "visualRingEnabled"
     private let timeOverlayKey = "timeOverlayEnabled"
     private let hourProgressKey = "hourProgressEnabled"
+    private let hudPlacementKey = "hudPlacement"
 
     private let availableSounds = ["Tink", "Ping", "Pop", "Glass", "Purr"]
+
+    private enum HUDPlacement: String, CaseIterable {
+        case topLeft, topRight, bottomLeft, bottomRight
+
+        var displayName: String {
+            switch self {
+            case .topLeft: return "Top Left"
+            case .topRight: return "Top Right"
+            case .bottomLeft: return "Bottom Left"
+            case .bottomRight: return "Bottom Right"
+            }
+        }
+    }
+
+    private var hudPlacement: HUDPlacement {
+        HUDPlacement(rawValue: UserDefaults.standard.string(forKey: hudPlacementKey) ?? "") ?? .bottomRight
+    }
 
     private lazy var clockFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -56,6 +74,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if defaults.object(forKey: hourProgressKey) == nil {
             defaults.set(false, forKey: hourProgressKey)
+        }
+        if defaults.string(forKey: hudPlacementKey) == nil {
+            defaults.set(HUDPlacement.bottomRight.rawValue, forKey: hudPlacementKey)
         }
 
         updateClock()
@@ -159,6 +180,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         window.hasShadow = false
         window.ignoresMouseEvents = true
         window.collectionBehavior = [.canJoinAllSpaces, .stationary]
+        // ARC (not AppKit) owns this window's lifetime; without this, close()
+        // triggers an extra AppKit-side release and over-releases the window.
+        window.isReleasedWhenClosed = false
 
         let contentView = NSView(frame: CGRect(origin: .zero, size: sf.size))
         contentView.wantsLayer = true
@@ -259,6 +283,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         window.hasShadow = false
         window.ignoresMouseEvents = true
         window.collectionBehavior = [.canJoinAllSpaces, .stationary]
+        // ARC (not AppKit) owns this window's lifetime; without this, close()
+        // triggers an extra AppKit-side release and over-releases the window.
+        window.isReleasedWhenClosed = false
 
         let bgView = NSView(frame: NSRect(origin: .zero, size: NSSize(width: panelWidth, height: panelHeight)))
         bgView.wantsLayer = true
@@ -340,12 +367,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let size: CGFloat = 64
         let inset: CGFloat = 20
 
-        let hudFrame = NSRect(
-            x: visibleFrame.maxX - size - inset,
-            y: visibleFrame.minY + inset,
-            width: size,
-            height: size
-        )
+        let originX: CGFloat
+        let originY: CGFloat
+        switch hudPlacement {
+        case .topLeft:
+            originX = visibleFrame.minX + inset
+            originY = visibleFrame.maxY - size - inset
+        case .topRight:
+            originX = visibleFrame.maxX - size - inset
+            originY = visibleFrame.maxY - size - inset
+        case .bottomLeft:
+            originX = visibleFrame.minX + inset
+            originY = visibleFrame.minY + inset
+        case .bottomRight:
+            originX = visibleFrame.maxX - size - inset
+            originY = visibleFrame.minY + inset
+        }
+
+        let hudFrame = NSRect(x: originX, y: originY, width: size, height: size)
 
         let window = NSWindow(
             contentRect: hudFrame,
@@ -359,6 +398,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         window.hasShadow = false
         window.ignoresMouseEvents = true
         window.collectionBehavior = [.canJoinAllSpaces, .stationary]
+        // ARC (not AppKit) owns this window's lifetime; without this, close()
+        // triggers an extra AppKit-side release and over-releases the window.
+        window.isReleasedWhenClosed = false
 
         let contentView = NSView(frame: NSRect(origin: .zero, size: CGSize(width: size, height: size)))
         contentView.wantsLayer = true
@@ -512,6 +554,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         hudItem.state = UserDefaults.standard.bool(forKey: hourProgressKey) ? .on : .off
         visualMenu.addItem(hudItem)
 
+        // HUD Placement submenu
+        let placementMenu = NSMenu()
+        let currentPlacement = hudPlacement
+        for placement in HUDPlacement.allCases {
+            let item = NSMenuItem(title: placement.displayName, action: #selector(handleHUDPlacementSelection(_:)), keyEquivalent: "")
+            item.representedObject = placement.rawValue
+            item.target = self
+            item.state = placement == currentPlacement ? .on : .off
+            placementMenu.addItem(item)
+        }
+        let placementItem = NSMenuItem(title: "HUD Placement", action: nil, keyEquivalent: "")
+        placementItem.submenu = placementMenu
+        visualMenu.addItem(placementItem)
+
         let visualAlertsItem = NSMenuItem(title: "Visual Alerts", action: nil, keyEquivalent: "")
         visualAlertsItem.submenu = visualMenu
         menu.addItem(visualAlertsItem)
@@ -586,6 +642,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             startHourProgressHUD()
         } else {
             stopHourProgressHUD()
+        }
+    }
+
+    @objc private func handleHUDPlacementSelection(_ sender: NSMenuItem) {
+        guard let rawValue = sender.representedObject as? String,
+              rawValue != hudPlacement.rawValue else { return }
+        UserDefaults.standard.set(rawValue, forKey: hudPlacementKey)
+        if UserDefaults.standard.bool(forKey: hourProgressKey) {
+            startHourProgressHUD()   // recreate the HUD window at its new position
         }
     }
 

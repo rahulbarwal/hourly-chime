@@ -8,6 +8,8 @@ A minimal macOS menu bar app that shows the current time and plays a soft chime 
 - Plays a short system sound exactly at each hour boundary (no catch-up on wake)
 - Configurable sound: Tink, Ping, Pop, Glass, Purr (default: Tink)
 - Configurable volume: Quiet (0.3), Medium (0.6), Loud (1.0) (default: Quiet)
+- Visual alerts on the hour: screen ring flash, time overlay, and an Hour Progress HUD
+- Configurable HUD placement: Top Left, Top Right, Bottom Left, Bottom Right (default: Bottom Right)
 - Launch at Login toggle via `SMAppService`
 - No Dock icon (`LSUIElement = YES` in Info.plist)
 - No Accessibility permission required
