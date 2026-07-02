@@ -2,6 +2,9 @@
 
 A minimal macOS menu bar app that shows the current time and plays a soft chime at the top of every hour.
 
+## Demo
+<video src="./assets/HourlyChime1_5x.mp4" controls width="100%"></video>
+
 ## Features
 
 - Displays current time in the menu bar (e.g. `10:00 AM`), updated every 30 seconds
