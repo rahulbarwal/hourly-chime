@@ -22,6 +22,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private let timeOverlayKey = "timeOverlayEnabled"
     private let hourProgressKey = "hourProgressEnabled"
     private let hudPlacementKey = "hudPlacement"
+    private let ringWidthKey = "ringWidth"
 
     private let availableSounds = ["Tink", "Ping", "Pop", "Glass", "Purr"]
 
@@ -54,6 +55,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         ("Loud", 1.0)
     ]
 
+    private let ringWidthLevels: [(label: String, value: CGFloat)] = [
+        ("Thin", 25),
+        ("Medium", 50),
+        ("Thick", 80),
+        ("Extra Thick", 120)
+    ]
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.action = #selector(handleStatusItemClick)
@@ -77,6 +85,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if defaults.string(forKey: hudPlacementKey) == nil {
             defaults.set(HUDPlacement.bottomRight.rawValue, forKey: hudPlacementKey)
+        }
+        if defaults.object(forKey: ringWidthKey) == nil {
+            defaults.set(Double(50), forKey: ringWidthKey)
         }
 
         updateClock()
@@ -166,7 +177,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showRingOnScreen(_ screen: NSScreen) {
         let sf = screen.frame
-        let borderWidth: CGFloat = 50
+        let borderWidth = CGFloat(UserDefaults.standard.double(forKey: ringWidthKey))
 
         let window = NSWindow(
             contentRect: sf,
@@ -188,6 +199,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         contentView.wantsLayer = true
         window.contentView = contentView
 
+        // Darker tone right at the screen edge, brightening slightly inward, then fading out
+        let cyanEdgeDark = NSColor(red: 0.0, green: 0.45, blue: 0.55, alpha: 0.70).cgColor
         let cyanOpaque = NSColor(red: 0.0, green: 0.831, blue: 1.0, alpha: 0.60).cgColor
         let cyanClear  = NSColor(red: 0.0, green: 0.831, blue: 1.0, alpha: 0.0).cgColor
 
@@ -198,7 +211,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         func addStrip(frame: CGRect, startPt: CGPoint, endPt: CGPoint) {
             let grad = CAGradientLayer()
             grad.frame = frame
-            grad.colors = [cyanOpaque, cyanClear]
+            grad.colors = [cyanEdgeDark, cyanOpaque, cyanClear]
+            grad.locations = [0.0, 0.4, 1.0]
             grad.startPoint = startPt
             grad.endPoint   = endPt
             container.addSublayer(grad)
@@ -544,6 +558,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         ringItem.state = UserDefaults.standard.bool(forKey: visualRingKey) ? .on : .off
         visualMenu.addItem(ringItem)
 
+        // Ring Width submenu
+        let ringWidthMenu = NSMenu()
+        let currentRingWidth = CGFloat(UserDefaults.standard.double(forKey: ringWidthKey))
+        for level in ringWidthLevels {
+            let item = NSMenuItem(title: level.label, action: #selector(handleRingWidthSelection(_:)), keyEquivalent: "")
+            item.representedObject = level.value
+            item.target = self
+            item.state = abs(level.value - currentRingWidth) < 0.01 ? .on : .off
+            ringWidthMenu.addItem(item)
+        }
+        let ringWidthItem = NSMenuItem(title: "Ring Width", action: nil, keyEquivalent: "")
+        ringWidthItem.submenu = ringWidthMenu
+        visualMenu.addItem(ringWidthItem)
+
         let timeOverlayItem = NSMenuItem(title: "Time Display", action: #selector(handleToggleTimeOverlay), keyEquivalent: "")
         timeOverlayItem.target = self
         timeOverlayItem.state = UserDefaults.standard.bool(forKey: timeOverlayKey) ? .on : .off
@@ -627,6 +655,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func handleToggleVisualRing() {
         let current = UserDefaults.standard.bool(forKey: visualRingKey)
         UserDefaults.standard.set(!current, forKey: visualRingKey)
+    }
+
+    @objc private func handleRingWidthSelection(_ sender: NSMenuItem) {
+        guard let value = sender.representedObject as? CGFloat else { return }
+        UserDefaults.standard.set(Double(value), forKey: ringWidthKey)
     }
 
     @objc private func handleToggleTimeOverlay() {
